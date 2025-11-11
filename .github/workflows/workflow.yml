@@ -122,13 +122,25 @@ jobs:
             else
               echo "Docker already installed."
             fi
+            # Ensure current user can access Docker daemon
+            if ! groups $USER | grep -q docker; then
+              echo "Adding $USER to docker group..."
+              sudo usermod -aG docker $USER || true
+              # Group change requires re-login; use sudo fallback in this session
+            fi
+            # Decide whether to use sudo for docker in this session
+            if docker info >/dev/null 2>&1; then
+              DOCKER="docker"
+            else
+              DOCKER="sudo docker"
+            fi
 
             # Login to GHCR and deploy container
-            docker login ghcr.io -u ${{ github.actor }} -p ${{ secrets.GITHUB_TOKEN }}
-            docker pull ${{ steps.prep.outputs.IMAGE }}
-            docker stop ${{ secrets.CONTAINER_NAME || 'node-app' }} || true
-            docker rm ${{ secrets.CONTAINER_NAME || 'node-app' }} || true
-            docker run -d \
+            $DOCKER login ghcr.io -u ${{ github.actor }} -p ${{ secrets.GITHUB_TOKEN }}
+            $DOCKER pull ${{ steps.prep.outputs.IMAGE }}
+            $DOCKER stop ${{ secrets.CONTAINER_NAME || 'node-app' }} || true
+            $DOCKER rm ${{ secrets.CONTAINER_NAME || 'node-app' }} || true
+            $DOCKER run -d \
               --name ${{ secrets.CONTAINER_NAME || 'node-app' }} \
               --restart unless-stopped \
               -p ${{ secrets.APP_PORT || '3000' }}:3000 \
