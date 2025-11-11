@@ -90,6 +90,40 @@ jobs:
           key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
           port: ${{ secrets.EC2_PORT || 22 }}
           script: |
+            set -e
+            # Install Docker if missing
+            if ! command -v docker >/dev/null 2>&1; then
+              echo "Docker not found. Installing..."
+              if command -v apt-get >/dev/null 2>&1; then
+                # Ubuntu/Debian
+                sudo apt-get remove -y docker docker-engine docker.io containerd runc || true
+                sudo apt-get update -y
+                sudo apt-get install -y ca-certificates curl gnupg
+                sudo install -m 0755 -d /etc/apt/keyrings
+                curl -fsSL https://download.docker.com/linux/$(. /etc/os-release && echo $ID)/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+                echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/$(. /etc/os-release && echo $ID) $(. /etc/os-release && echo $VERSION_CODENAME) stable" | sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
+                sudo apt-get update -y
+                sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+                sudo systemctl enable --now docker
+              elif command -v dnf >/dev/null 2>&1; then
+                # Amazon Linux 2023 / Fedora / RHEL9
+                sudo dnf install -y docker || sudo dnf install -y moby-engine
+                sudo systemctl enable --now docker
+                # Compose plugin if available
+                sudo dnf install -y docker-compose-plugin || true
+              elif command -v yum >/dev/null 2>&1; then
+                # Amazon Linux 2 / CentOS
+                sudo yum install -y docker || sudo amazon-linux-extras install -y docker
+                sudo systemctl enable --now docker
+              else
+                echo "Unsupported OS for automatic Docker install." >&2
+                exit 1
+              fi
+            else
+              echo "Docker already installed."
+            fi
+
+            # Login to GHCR and deploy container
             docker login ghcr.io -u ${{ github.actor }} -p ${{ secrets.GITHUB_TOKEN }}
             docker pull ${{ steps.prep.outputs.IMAGE }}
             docker stop ${{ secrets.CONTAINER_NAME || 'node-app' }} || true
