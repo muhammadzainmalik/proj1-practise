@@ -29,6 +29,61 @@ jobs:
       - name: Smoke run (start briefly then stop)
         run: |
           npm start & 
+      - name: Docker build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          platforms: linux/amd64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Extract metadata (tags, labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=latest
+            type=sha
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          platforms: linux/amd64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  deploy-ec2:
+    runs-on: ubuntu-latest
+    needs: docker-build-and-push
+    steps:
+      - name: Prepare image ref
+        id: prep
+        run: |
+          echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY}:latest" >> $GITHUB_OUTPUT
+
+      - name: SSH to EC2 and deploy
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          port: ${{ secrets.EC2_PORT || 22 }}
+          script: |
+            docker login ghcr.io -u ${{ github.actor }} -p ${{ secrets.GITHUB_TOKEN }}
+            docker pull ${{ steps.prep.outputs.IMAGE }}
+            docker stop ${{ secrets.CONTAINER_NAME || 'node-app' }} || true
+            docker rm ${{ secrets.CONTAINER_NAME || 'node-app' }} || true
+            docker run -d \
+              --name ${{ secrets.CONTAINER_NAME || 'node-app' }} \
+              --restart unless-stopped \
+              -p ${{ secrets.APP_PORT || '3000' }}:3000 \
+              ${{ steps.prep.outputs.IMAGE }}
           
 
 
